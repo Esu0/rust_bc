@@ -1,12 +1,13 @@
 pub mod state_gen;
 use crate::material::Glow1Material;
 
-use self::state_gen::{StateDiff, StateDiffVal};
+use self::state_gen::{Maanim, StateDiff, StateDiffVal, StateDiffs, StateGenerator};
 
 use super::*;
 use bevy::{
     prelude::*,
-    sprite::{Anchor, MaterialMesh2dBundle, Mesh2dHandle}, time::common_conditions::on_timer,
+    sprite::{Anchor, MaterialMesh2dBundle, Mesh2dHandle},
+    time::common_conditions::on_timer,
 };
 
 pub struct BcuAnim;
@@ -96,14 +97,14 @@ pub struct State {
     vertical_flip: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitForm {
     Form1,
     Form2,
     Form3,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitSelector {
     Unit((u16, UnitForm)),
     Enemy(u16),
@@ -126,6 +127,17 @@ impl UnitForm {
             _ => None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimSelector {
+    Walk,
+    Idle,
+    Attack,
+    HitBack,
+    BurrowDown,
+    BurrowMove,
+    BurrowUp,
 }
 
 impl UnitSelector {
@@ -191,6 +203,19 @@ impl UnitSelector {
 
     pub fn image_size(&self) -> String {
         self.filename() + ".png.size"
+    }
+
+    pub fn maanim(&self, selector: AnimSelector) -> String {
+        self.filename()
+            + match selector {
+                AnimSelector::Walk => "00.maanim",
+                AnimSelector::Idle => "01.maanim",
+                AnimSelector::Attack => "02.maanim",
+                AnimSelector::HitBack => "03.maanim",
+                AnimSelector::BurrowDown => "_zombie00.maanim",
+                AnimSelector::BurrowMove => "_zombie01.maanim",
+                AnimSelector::BurrowUp => "_zombie02.maanim",
+            }
     }
 }
 
@@ -342,35 +367,49 @@ fn startup_sprite_images(
     mut glow_materials: ResMut<Assets<Glow1Material>>,
 ) {
     let unit_id = std::fs::read_to_string("num.txt").unwrap().parse().unwrap();
+    let selector = UnitSelector::Unit((unit_id, UnitForm::Form1));
+    // 画像関連のデータ
     let image_data = UnitImages::load(
-        &[UnitSelector::Unit((unit_id, UnitForm::Form1))],
+        &[selector],
         &asset_server,
         &mut meshes,
         &mut color_materials,
         &mut glow_materials,
     );
-    let mamodels = Mamodels::load(
-        Path::new(BC_ASSET_PATH).join(UnitSelector::Unit((unit_id, UnitForm::Form1)).mamodels()),
+
+    // println!("loaded: {mamodels:?}");
+
+    // アニメーションロード
+    let maanim = Maanim::load(
+        Path::new(BC_ASSET_PATH)
+            .join(selector.maanim(AnimSelector::Attack)),
     )
-    .unwrap();
-    commands.insert_resource(UnitState {
-        states: mamodels
-            .models
-            .iter()
-            .map(|model| {
-                println!("insert: {model:?}");
-                State::from_model(model)
-            })
-            .collect(),
-    });
-    commands.spawn(Camera2dBundle::default());
-    let parent = commands.spawn((Unit, SpatialBundle::default())).id();
+    .ok();
+
     let UnitImage {
         materials: material_handles,
         meshes: mesh_handles,
         size: sizes,
-        mamodels: _,
+        mamodels,
     } = image_data.images[0].as_ref().unwrap();
+
+    for (i, model) in mamodels.models.iter().enumerate() {
+        println!("{i}: {model:?}");
+    }
+    // アニメーション定義
+    // commands.insert_resource(
+    //     maanim
+    //         .map(|anim| anim.into_state_generator(&mamodels))
+    //         .unwrap_or_else(|| StateGenerator::empty(&mamodels)),
+    // );
+
+    commands.insert_resource(StateGenerator::with_raw_model(&mamodels));
+
+    commands.spawn(Camera2dBundle::default());
+    let parent = commands.spawn((Unit, SpatialBundle {
+        transform: Transform::from_xyz(0., -300., 0.),
+        ..default()
+    })).id();
     let ids = UnitSpriteId {
         parts: material_handles
             .iter()
@@ -443,7 +482,7 @@ fn update_unit_sprite(
         ),
         (With<UnitSpritePartChild>, Without<UnitSpritePartParent>),
     >,
-    states: Res<UnitState>,
+    mut states: ResMut<StateGenerator>,
     image_data: Res<UnitImages>,
     ids: Res<UnitSpriteId>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
@@ -453,7 +492,7 @@ fn update_unit_sprite(
         &mut commands,
         &mut query_parent,
         &mut query_child,
-        states.states.iter().cloned(),
+        states.next_state(),
         image_data.images[0].as_ref().unwrap(),
         ids.as_ref(),
         &mut color_materials,
@@ -542,9 +581,8 @@ pub struct PluginTemp;
 
 impl Plugin for PluginTemp {
     fn build(&self, app: &mut App) {
-        app
-            .add_startup_system(startup_sprite_images)
-            .add_system(update_unit_sprite.run_if(on_timer(Duration::from_secs_f32(1. / 30.))))
+        app.add_startup_system(startup_sprite_images)
+            .add_system(update_unit_sprite.run_if(on_timer(Duration::from_secs_f32(1./5.))))
             .add_system(debug_system.run_if(on_timer(Duration::from_secs_f32(1. / 5.))));
     }
 }
@@ -573,6 +611,50 @@ impl UnitState {
             zorders: Vec::with_capacity(self.states.len()),
         }
     }
+
+    pub fn load_diff(&mut self, diff: StateDiffs) {
+        diff.0.iter().for_each(|diff| {
+            let StateDiff { id, diff } = *diff;
+            self.states[id as usize].load_diff(diff);
+        });
+    }
+
+    pub fn from_model(models: &Mamodels) -> Self {
+        Self {
+            states: models
+                .models
+                .iter()
+                .map(|model| State {
+                    x: 0,
+                    y: 0,
+                    pivotx: 0,
+                    pivoty: 0,
+                    scale: models.scale_ratio as _,
+                    scalex: models.scale_ratio as _,
+                    scaley: models.scale_ratio as _,
+                    angle: 0,
+                    opacity: models.opacity_ratio as _,
+                    ..State::from_model(model)
+                })
+                .collect(),
+        }
+    }
+
+    pub fn apply_model(&mut self, models: &Mamodels) {
+        self.states
+            .iter_mut()
+            .zip(&models.models)
+            .for_each(|(state, model)| {
+                state.x += model.posx;
+                state.y += model.posy;
+                state.pivotx += model.pivotx;
+                state.pivoty += model.pivoty;
+                state.scalex *= model.scalex;
+                state.scaley *= model.scaley;
+                state.angle += model.angle;
+                state.opacity *= model.opacity;
+            });
+    }
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -591,38 +673,57 @@ fn update_texture(
         ),
         (With<UnitSpritePartChild>, Without<UnitSpritePartParent>),
     >,
-    itr_state: impl Iterator<Item = State>,
+    mut states: UnitState,
     image_data: &UnitImage,
     ids: &UnitSpriteId,
     color_materials: &mut ResMut<Assets<ColorMaterial>>,
     glow_materials: &mut ResMut<Assets<Glow1Material>>,
 ) {
-    let mut tmp: Vec<(f32, i32)> = Vec::new();
-    for (state, id) in itr_state.zip(&ids.parts) {
+    states.apply_model(&image_data.mamodels);
+    let mut opacities: Vec<Option<f32>> = vec![None; states.states.len()];
+    for (state, id) in states.states.iter().zip(&ids.parts).skip(1) {
+        commands.entity(id.parent).remove_parent();
+    }
+    // println!("state72: {:?}", states.states[72]);
+    for (i, (state, id)) in states.states.iter().zip(&ids.parts).enumerate() {
         let opacity;
         let zorder;
         let mesh;
 
-        let opacity_ratio = image_data.mamodels.opacity_ratio as f32;
-        let scale_ratio = image_data.mamodels.scale_ratio as f32;
+        let opacity_ratio = (image_data.mamodels.opacity_ratio as f32).powi(2);
+        let scale_ratio = (image_data.mamodels.scale_ratio as f32).powi(3);
         let angle_ratio = image_data.mamodels.angle_ratio as f32;
-        if let Some((opa, z)) = tmp.get(state.parent as usize) {
-            opacity = *opa * (state.opacity as f32 / opacity_ratio);
-            zorder = state.zorder - z;
+        if state.parent >= 0 {
+            commands.entity(id.parent).set_parent(ids.parts[state.parent as usize].parent);
             mesh = match image_data.meshes.get(state.img as usize) {
                 Some(m) => m.clone(),
                 None => Mesh2dHandle::default(),
             };
-
-            let parent_entity = &ids.parts[state.parent as usize];
-            commands.entity(id.parent).set_parent(parent_entity.parent);
+            zorder = state.zorder - states.states[state.parent as usize].zorder;
         } else {
-            opacity = state.opacity as f32 / opacity_ratio;
-            zorder = state.zorder;
             mesh = Mesh2dHandle::default();
+            zorder = state.zorder;
+        }
+        if state.parent < 0 {
+            opacity = state.opacity as f32 / opacity_ratio;
+            opacities[i] = Some(opacity);
+        } else if let Some(val) = opacities[i] {
+            opacity = val;
+        } else {
+            let mut parent_ind = state.parent as usize;
+            let mut indice = vec![i];
+            while let None = opacities[parent_ind] {
+                indice.push(parent_ind);
+                parent_ind = states.states[parent_ind].parent as usize;
+            }
+            let mut prev_ind = parent_ind;
+            for i in indice.iter().rev() {
+                opacities[*i] = opacities[parent_ind].map(|opa| opa * states.states[*i].opacity as f32 / opacity_ratio);
+                prev_ind = *i;
+            }
+            opacity = opacities[i].unwrap();
         }
 
-        tmp.push((opacity, state.zorder));
         let size = image_data
             .size
             .get(state.img as usize)
@@ -643,12 +744,14 @@ fn update_texture(
                     -state.scalex as f32
                 } else {
                     state.scalex as f32
-                } / scale_ratio,
+                } * state.scale as f32
+                    / scale_ratio,
                 if state.vertical_flip {
                     -state.scaley as f32
                 } else {
                     state.scaley as f32
-                } / scale_ratio,
+                } * state.scale as f32
+                    / scale_ratio,
                 1.,
             ));
 

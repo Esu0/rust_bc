@@ -10,7 +10,7 @@ use std::io::{self, BufRead, BufReader, Lines};
 use std::path::Path;
 use std::str::{FromStr, Split};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Maanim {
     parts: Vec<MaanimPart>,
     period: u32,
@@ -18,7 +18,7 @@ pub struct Maanim {
 
 #[derive(Debug, Clone)]
 pub struct MaanimPart {
-    id: u8,
+    id: u16,
     modification: Modification,
     loops: bool,
     eases: Vec<Ease>,
@@ -117,12 +117,12 @@ impl Sign {
 /// [(id0, diff0), (id1, diff1), (id2, diff2), ...]
 /// idについて昇順ソート済み
 #[derive(Clone, Debug)]
-pub struct StateDiffs(Vec<StateDiff>);
+pub struct StateDiffs(pub Vec<StateDiff>);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct StateDiff {
-    id: i32,
-    diff: StateDiffVal,
+    pub id: i32,
+    pub diff: StateDiffVal,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -238,13 +238,9 @@ impl Maanim {
         Ok(Maanim { parts, period })
     }
 
-    pub fn into_state_generator(self, mamodels: &Mamodels) -> (StateDiffGenerator, UnitState) {
-        let model_len = mamodels.models.len();
-        let mut v: Vec<super::State> = mamodels
-            .models
-            .iter()
-            .map(|model| super::State::from_model(model))
-            .collect();
+    pub fn into_state_generator(self, mamodels: &Mamodels) -> StateGenerator {
+        let part_len = self.parts.len();
+        let mut state = UnitState::from_model(mamodels);
         let part_indice = self
             .parts
             .iter()
@@ -254,25 +250,27 @@ impl Maanim {
                     .binary_search_by(|ease| ease.frame.cmp(&0))
                     .unwrap_or_default();
                 if let Some(diff) = StateDiffVal::new(anim.modification, anim.eases[ind].value) {
-                    v[anim.id as usize].load_diff(diff);
+                    let state_ref = &mut state.states[anim.id as usize];
+                    state_ref.load_diff(diff);
                 }
                 ind as u16
             })
             .collect();
 
-        (
-            StateDiffGenerator {
+        StateGenerator {
+            diff_generator: StateDiffGenerator {
                 maanim: self,
                 current_frame: 0,
                 part_indice,
-                buf_queue: vec![VecDeque::new(); model_len],
+                buf_queue: vec![VecDeque::new(); part_len],
             },
-            UnitState { states: v },
-        )
+            current_state: state,
+        }
     }
 }
 
 use std::collections::VecDeque;
+#[derive(Clone, Debug, Default)]
 pub struct StateDiffGenerator {
     maanim: Maanim,
     current_frame: i32,
@@ -280,15 +278,46 @@ pub struct StateDiffGenerator {
     buf_queue: Vec<VecDeque<Option<StateDiffVal>>>,
 }
 
+#[derive(Clone, Resource, Debug)]
 pub struct StateGenerator {
     diff_generator: StateDiffGenerator,
     current_state: UnitState,
 }
 
-impl Iterator for StateGenerator {
-    type Item = UnitState;
-    fn next(&mut self) -> Option<Self::Item> {
-        
+impl StateGenerator {
+    pub fn next_state(&mut self) -> UnitState {
+        let StateGenerator {diff_generator, current_state} = self;
+        let next = current_state.clone();
+        current_state.load_diff(diff_generator.next_state_diff());
+        next
+    }
+}
+
+// impl Iterator for StateGenerator {
+//     type Item = UnitState;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let StateGenerator {diff_generator, current_state} = self;
+//         let next = current_state.clone();
+//         current_state.load_diff(diff_generator.next_state_diff());
+//         Some(next)
+//     }
+// }
+
+impl StateGenerator {
+    pub fn empty(models: &Mamodels) -> Self {
+        Self {
+            diff_generator: StateDiffGenerator::default(),
+            current_state: UnitState {
+                states: vec![super::State::default(); models.models.len()],
+            }
+        }
+    }
+
+    pub fn with_raw_model(models: &Mamodels) -> Self {
+        Self {
+            diff_generator: StateDiffGenerator::default(),
+            current_state: UnitState::from_model(models),
+        }
     }
 }
 impl StateDiffGenerator {
@@ -321,19 +350,18 @@ impl StateDiffGenerator {
                 *ind += 1;
                 let fd;
                 let vd;
-                let easing;
+                let easing = ease1.easing;
                 if let Some(ease2) = part.eases.get(*ind as usize) {
                     fd = ease2.frame - ease1.frame;
                     vd = ease2.value - ease1.value;
-                    easing = ease2.easing
                 } else {
                     ease1 = &part.eases[0];
                     let ease2 = &part.eases[1];
                     *ind = 1;
-                    easing = ease2.easing;
                     fd = ease2.frame - ease1.frame;
                     vd = ease2.value - ease1.value;
                 }
+
                 match easing {
                     Easing::Linear => {
                         let l = vd as f64 / fd as f64;
@@ -369,6 +397,7 @@ impl StateDiffGenerator {
                             queue
                                 .push_front(StateDiffVal::new(part.modification, ease1.value + vd));
                         }
+                        
                     }
                     Easing::InOut(p) => {
                         if p >= 0 {
@@ -389,8 +418,9 @@ impl StateDiffGenerator {
                                     ));
                                 }
                             }
+                            
                         } else {
-                            let func = |x: f64| (1. - (1. - x).powi(p)).sqrt();
+                            let func = |x: f64| (1. - (1. - x).powi(-p)).sqrt();
                             if let Some(diff) = StateDiffVal::new(
                                 part.modification,
                                 ease1.value + (vd as f64 * func(1. / fd as f64)) as i32,
@@ -407,6 +437,7 @@ impl StateDiffGenerator {
                                     ));
                                 }
                             }
+                            
                         };
                     }
                     Easing::Sine(sig) => {
@@ -439,9 +470,11 @@ impl StateDiffGenerator {
                                 ));
                             }
                         }
+                        println!("(id: {}, frame: {current_frame}): {queue:?}", part.id);
+                        println!("func(): {}", func(1. / fd as f64));
                     }
                     Easing::Ease3 => {
-                        let low = *ind as usize;
+                        let low = (*ind - 1) as usize;
                         while *ind < (part.eases.len() - 1) as u16 {
                             if part.eases[*ind as usize].easing != Easing::Ease3 {
                                 break;
@@ -449,9 +482,10 @@ impl StateDiffGenerator {
                             *ind += 1;
                         }
                         let high = *ind as usize;
-                        let factors: Vec<f64> = part.eases[low..=high]
+                        let factors: Vec<f64> = part.eases[..=high]
                             .iter()
                             .enumerate()
+                            .skip(low)
                             .map(|(i, e)| {
                                 let mut factor = 4096.0;
                                 for j in low..i {
@@ -463,24 +497,29 @@ impl StateDiffGenerator {
                                 factor
                             })
                             .collect();
-                        *queue = (*current_frame..part.eases[high].frame)
+                        // println!("eases: {:?}", &part.eases[low..=high]);
+                        // println!("{factors:?}");
+                        let frame = (*current_frame - part.frame_start) % (part.frame_end - part.frame_start) + part.frame_start;
+                        *queue = ((frame + 1)..part.eases[high].frame)
                             .map(|f| {
                                 let mut sum = 0.;
                                 for (i, factor) in factors.iter().enumerate() {
-                                    let mut val = *factor;
-                                    for j in low..i {
+                                    let ind_i = i + low;
+                                    let mut val = *factor * part.eases[ind_i].value as f64;
+                                    for j in low..ind_i {
                                         val *= (f - part.eases[j].frame) as f64;
                                     }
-                                    for j in (i + 1)..=high {
+                                    for j in (ind_i + 1)..=high {
                                         val *= (f - part.eases[j].frame) as f64;
                                     }
                                     sum += val;
                                 }
-                                StateDiffVal::new(part.modification, sum as i32)
+                                StateDiffVal::new(part.modification, (sum / 4096.) as i32)
                             })
                             .rev()
                             .collect();
                         if let Some(Some(diff)) = queue.pop_back() {
+                            // println!("{queue:?}");
                             diff_set.push(StateDiff {
                                 id: part.id as _,
                                 diff,

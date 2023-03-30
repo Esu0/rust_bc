@@ -4,7 +4,10 @@ mod database;
 mod material;
 use std::time::Duration;
 
-use bevy::{prelude::*, sprite::{Anchor, Material2dPlugin, ColorMaterialPlugin}, app::{ScheduleRunnerPlugin, ScheduleRunnerSettings}};
+use bevy::{
+    prelude::*,
+    sprite::{Anchor, Material2dPlugin},
+};
 
 #[derive(Component)]
 struct Enemy;
@@ -23,16 +26,14 @@ struct Entities {
     child: Entity,
 }
 
+#[derive(Resource)]
+struct GrandChild(Entity);
 fn startup_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    // mut texture_atlases: ResMut<Assets<TextureAtlas>>,
 ) {
     commands.spawn(Camera2dBundle::default());
-    let mut atlas = TextureAtlas::new_empty(
-        asset_server.load("org/enemy/000/000_e.png"),
-        Vec2::new(50.0, 56.0),
-    );
     let texture = asset_server.load("org/enemy/000/000_e.png");
 
     let mut sprite = SpriteBundle {
@@ -44,31 +45,27 @@ fn startup_system(
             anchor: Anchor::TopLeft,
             ..default()
         },
-        transform: Transform::from_xyz(0., 0., 0.),
+        transform: Transform::from_xyz(0., 0., 0.)
+            .with_scale(Vec3::new(-2., 1., 1.))
+            .with_rotation(Quat::from_rotation_z(f32::to_radians(-90.))),
         ..default()
     };
 
-    let mut origin = sprite.clone();
-    origin.transform.translation += Vec3::new(-300., 0., 0.);
-    sprite.transform.translation += Vec3::new(100., 100., 0.);
-    atlas.add_texture(Rect::new(1., 1., 51., 57.));
-    atlas.add_texture(Rect::new(52., 1., 102., 57.));
-    atlas.add_texture(Rect::new(103., 1., 153., 57.));
-    commands.spawn((
-        Enemy,
-        SpriteSheetBundle {
-            texture_atlas: texture_atlases.add(atlas),
-            sprite: TextureAtlasSprite::new(1),
-            ..default()
-        },
-    ));
-    let origin = commands.spawn(origin).id();
+    // let mut origin = sprite.clone();
+    // let mut sprite2 = sprite.clone();
+    // origin.transform.translation += Vec3::new(-300., 0., 0.);
+    // sprite.transform.translation += Vec3::new(100., 100., 0.);
+    // sprite2.transform.translation += Vec3::new(100., 0., 0.);
+    // let origin = commands.spawn(origin).id();
     let sprite = commands.spawn(sprite).id();
-    commands.insert_resource(Entities {
-        parent: origin,
-        child: sprite,
-    });
-    commands.entity(origin).add_child(sprite);
+    // let sprite2 = commands.spawn(sprite2).id();
+    // commands.insert_resource(Entities {
+    //     parent: origin,
+    //     child: sprite,
+    // });
+    // commands.entity(origin).add_child(sprite);
+    // commands.entity(sprite).add_child(sprite2);
+    // commands.insert_resource(GrandChild(sprite2));
 }
 
 fn animate_system(mut query: Query<&mut TextureAtlasSprite>) {
@@ -85,6 +82,8 @@ fn animate_system(mut query: Query<&mut TextureAtlasSprite>) {
 fn toggle_child(
     mut entities: ResMut<Entities>,
     mut commands: Commands,
+    mut query: Query<&mut Transform>,
+    grandchild: Res<GrandChild>,
     input: Res<Input<KeyCode>>,
 ) {
     if input.just_pressed(KeyCode::A) {
@@ -94,8 +93,14 @@ fn toggle_child(
     }
     if input.just_pressed(KeyCode::Z) {
         let Entities { parent, child } = entities.as_mut();
-        commands.entity(*parent).clear_children().set_parent(*child);
+        // commands.entity(*child).remove_parent();
+        commands.entity(*parent).set_parent(*child);
+        // let mut transform = query.get_mut(*parent).unwrap();
+        // transform.translation *= -1.;
         std::mem::swap(parent, child);
+    }
+    if input.just_pressed(KeyCode::S) {
+        commands.entity(grandchild.0).remove_parent();
     }
 }
 
@@ -121,5 +126,4 @@ fn main() {
         // .add_startup_system(material::startup)
         // .add_system(material::system)
         .run();
-
 }
