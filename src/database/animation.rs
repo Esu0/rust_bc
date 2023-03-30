@@ -380,11 +380,8 @@ fn startup_sprite_images(
     // println!("loaded: {mamodels:?}");
 
     // アニメーションロード
-    let maanim = Maanim::load(
-        Path::new(BC_ASSET_PATH)
-            .join(selector.maanim(AnimSelector::Attack)),
-    )
-    .ok();
+    let maanim =
+        Maanim::load(Path::new(BC_ASSET_PATH).join(selector.maanim(AnimSelector::Attack))).ok();
 
     let UnitImage {
         materials: material_handles,
@@ -393,37 +390,52 @@ fn startup_sprite_images(
         mamodels,
     } = image_data.images[0].as_ref().unwrap();
 
-    for (i, model) in mamodels.models.iter().enumerate() {
-        println!("{i}: {model:?}");
-    }
+    // for (i, model) in mamodels.models.iter().enumerate() {
+    //     println!("{i}: {model:?}");
+    // }
     // アニメーション定義
-    // commands.insert_resource(
-    //     maanim
-    //         .map(|anim| anim.into_state_generator(&mamodels))
-    //         .unwrap_or_else(|| StateGenerator::empty(&mamodels)),
-    // );
+    commands.insert_resource(
+        maanim
+            .map(|anim| anim.into_state_generator(&mamodels))
+            .unwrap_or_else(|| StateGenerator::empty(&mamodels)),
+    );
 
-    commands.insert_resource(StateGenerator::with_raw_model(&mamodels));
+    // commands.insert_resource(StateGenerator::with_raw_model(&mamodels));
 
     commands.spawn(Camera2dBundle::default());
-    let parent = commands.spawn((Unit, SpatialBundle {
-        transform: Transform::from_xyz(0., -300., 0.),
-        ..default()
-    })).id();
+    let parent = commands
+        .spawn((
+            Unit,
+            SpatialBundle {
+                transform: Transform::from_xyz(0., -300., 0.),
+                ..default()
+            },
+        ))
+        .id();
     let ids = UnitSpriteId {
         parts: material_handles
             .iter()
             .zip(&mamodels.models)
-            .map(|(mate, model)| {
+            .enumerate()
+            .map(|(i, (mate, model))| {
                 let parent = commands
                     .spawn((UnitSpritePartParent, SpatialBundle::default()))
                     .set_parent(parent)
                     .id();
 
-                let size = sizes.get(model.imgind as usize).unwrap_or(&Size2d {
+                let size = sizes.get(model.imgind as usize).copied().unwrap_or(Size2d {
                     width: 0,
                     height: 0,
                 });
+                // let size =
+                // if [0, 2, 11, 62].contains(&i) {
+                //     sizes.get(model.imgind as usize).copied().unwrap_or(Size2d {
+                //         width: 0,
+                //         height: 0,
+                //     })
+                // } else {
+                //     Size2d::default()
+                // };
                 let mesh_temp = Mesh2dHandle::default();
                 let mesh = mesh_handles
                     .get(model.imgind as usize)
@@ -511,17 +523,29 @@ fn update_unit_sprite(
 }
 
 fn debug_system(
-    query: Query<(&Mesh2dHandle), With<UnitSpritePartChild>>,
-    // ids: Res<UnitSpriteId>,
-    meshes: Res<Assets<Mesh>>,
+    query: Query<(&Transform), With<UnitSpritePartParent>>,
+    ids: Res<UnitSpriteId>,
+    // meshes: Res<Assets<Mesh>>,
     input: Res<Input<KeyCode>>,
+    mut commands: Commands,
 ) {
     if input.just_pressed(KeyCode::Space) {
-        for mesh_handle in &query {
-            println!("{:#?}", meshes.get(&mesh_handle.0));
-        }
+        let (t11, t62) = (
+            query.get(ids.parts[11].parent).unwrap(),
+            query.get(ids.parts[62].parent).unwrap(),
+        );
+        println!(
+            "11: {:?}, angle: {}",
+            t11,
+            t11.rotation.angle_between(Quat::default()).to_degrees()
+        );
+        println!(
+            "62: {:?}, angle: {}",
+            t62,
+            t62.rotation.angle_between(Quat::default()).to_degrees()
+        );
     }
-    println!("test");
+    // println!("test");
     // if input.just_pressed(KeyCode::Left) {
     //     for mut transform in &mut query {
     //         transform.scale -= Vec3::new(0.2, 0.2, 0.);
@@ -556,12 +580,12 @@ fn debug_system2(
     // }
 }
 fn debug_system3(
-    mut query: Query<&mut Transform, With<UnitSpritePartChild>>,
+    mut query: Query<&mut GlobalTransform, With<UnitSpritePartChild>>,
     input: Res<Input<KeyCode>>,
 ) {
     if input.just_pressed(KeyCode::C) {
         for transform in &mut query {
-            println!("{:#?}", transform);
+            println!("{}", transform.translation().z);
         }
     }
 }
@@ -582,8 +606,8 @@ pub struct PluginTemp;
 impl Plugin for PluginTemp {
     fn build(&self, app: &mut App) {
         app.add_startup_system(startup_sprite_images)
-            .add_system(update_unit_sprite.run_if(on_timer(Duration::from_secs_f32(1./5.))))
-            .add_system(debug_system.run_if(on_timer(Duration::from_secs_f32(1. / 5.))));
+            .add_system(update_unit_sprite.run_if(on_timer(Duration::from_secs_f32(1. / 30.))))
+            .add_system(debug_system);
     }
 }
 pub struct UnitSpriteIter<'a> {
@@ -680,7 +704,7 @@ fn update_texture(
     glow_materials: &mut ResMut<Assets<Glow1Material>>,
 ) {
     states.apply_model(&image_data.mamodels);
-    let mut opacities: Vec<Option<f32>> = vec![None; states.states.len()];
+    let mut opacities: Vec<Option<(f32, bool)>> = vec![None; states.states.len()];
     for (state, id) in states.states.iter().zip(&ids.parts).skip(1) {
         commands.entity(id.parent).remove_parent();
     }
@@ -693,8 +717,11 @@ fn update_texture(
         let opacity_ratio = (image_data.mamodels.opacity_ratio as f32).powi(2);
         let scale_ratio = (image_data.mamodels.scale_ratio as f32).powi(3);
         let angle_ratio = image_data.mamodels.angle_ratio as f32;
+        let mut angle_direction = 1.;
         if state.parent >= 0 {
-            commands.entity(id.parent).set_parent(ids.parts[state.parent as usize].parent);
+            commands
+                .entity(id.parent)
+                .set_parent(ids.parts[state.parent as usize].parent);
             mesh = match image_data.meshes.get(state.img as usize) {
                 Some(m) => m.clone(),
                 None => Mesh2dHandle::default(),
@@ -704,11 +731,26 @@ fn update_texture(
             mesh = Mesh2dHandle::default();
             zorder = state.zorder;
         }
+
         if state.parent < 0 {
             opacity = state.opacity as f32 / opacity_ratio;
-            opacities[i] = Some(opacity);
-        } else if let Some(val) = opacities[i] {
-            opacity = val;
+            opacities[i] = Some((
+                opacity,
+                state.scalex.is_positive() ^ state.scaley.is_positive(),
+            ));
+        } else if let Some((opa, sig)) = opacities[state.parent as usize] {
+            opacity = opa * state.opacity as f32 / opacity_ratio;
+            if sig {
+                angle_direction = -angle_direction;
+            }
+            opacities[i] = Some((
+                opacity,
+                state.scalex.is_positive()
+                    ^ state.scaley.is_positive()
+                    // ^ state.vertical_flip
+                    // ^ state.horizontal_flip
+                    ^ sig,
+            ));
         } else {
             let mut parent_ind = state.parent as usize;
             let mut indice = vec![i];
@@ -717,11 +759,24 @@ fn update_texture(
                 parent_ind = states.states[parent_ind].parent as usize;
             }
             let mut prev_ind = parent_ind;
-            for i in indice.iter().rev() {
-                opacities[*i] = opacities[parent_ind].map(|opa| opa * states.states[*i].opacity as f32 / opacity_ratio);
-                prev_ind = *i;
+            for i in indice.iter().rev().copied() {
+                opacities[i] = opacities[prev_ind].map(|(opa, sig)| {
+                    let state = &states.states[i];
+                    (
+                        opa * states.states[i].opacity as f32 / opacity_ratio,
+                        state.scalex.is_positive()
+                            ^ state.scaley.is_positive()
+                            // ^ state.vertical_flip
+                            // ^ state.horizontal_flip
+                            ^ sig,
+                    )
+                });
+                prev_ind = i;
             }
-            opacity = opacities[i].unwrap();
+            opacity = opacities[i].unwrap().0;
+            if opacities[state.parent as usize].unwrap().1 {
+                angle_direction = -angle_direction;
+            }
         }
 
         let size = image_data
@@ -735,25 +790,29 @@ fn update_texture(
             0.,
         );
 
+        let scalex = if state.horizontal_flip {
+            -state.scalex as f32
+        } else {
+            state.scalex as f32
+        } * state.scale as f32
+            / scale_ratio;
+        let scaley = if state.vertical_flip {
+            -state.scaley as f32
+        } else {
+            state.scaley as f32
+        } * state.scale as f32
+            / scale_ratio;
+        
+        let mut angle = -state.angle as f32 / angle_ratio * 2. * std::f32::consts::PI;
+        if state.horizontal_flip {
+            angle = -angle;
+        }
+        if state.vertical_flip {
+            angle = -angle;
+        }
         let parent_transform = Transform::from_xyz(state.x as f32, -state.y as f32, zorder as f32)
-            .with_rotation(Quat::from_rotation_z(
-                -state.angle as f32 / angle_ratio * 2. * std::f32::consts::PI,
-            ))
-            .with_scale(Vec3::new(
-                if state.horizontal_flip {
-                    -state.scalex as f32
-                } else {
-                    state.scalex as f32
-                } * state.scale as f32
-                    / scale_ratio,
-                if state.vertical_flip {
-                    -state.scaley as f32
-                } else {
-                    state.scaley as f32
-                } * state.scale as f32
-                    / scale_ratio,
-                1.,
-            ));
+            .with_rotation(Quat::from_rotation_z(angle * angle_direction))
+            .with_scale(Vec3::new(scalex, scaley, 1.));
 
         *query_parent.get_mut(id.parent).unwrap() = parent_transform;
 
@@ -777,6 +836,7 @@ fn update_texture(
         }
         // println!("update");
     }
+    // println!("opacities: {opacities:#?}");
 }
 
 // impl<'a> Iterator for UnitSpriteIter<'a> {

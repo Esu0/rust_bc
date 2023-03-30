@@ -39,25 +39,41 @@ fn startup_system(
     let mut sprite = SpriteBundle {
         texture,
         sprite: Sprite {
-            color: Color::rgba(1., 1., 1., 1.),
+            color: Color::rgba(1., 0., 1., 1.),
             rect: Some(Rect::new(30., 30., 60., 70.)),
             custom_size: Some(Vec2::new(100., 100.)),
             anchor: Anchor::TopLeft,
             ..default()
         },
-        transform: Transform::from_xyz(0., 0., 0.)
-            .with_scale(Vec3::new(-2., 1., 1.))
-            .with_rotation(Quat::from_rotation_z(f32::to_radians(-90.))),
+        transform: Transform::from_xyz(-11., -216., 50.)
+            .with_scale(Vec3::new(1., 1., 1.))
+            .with_rotation(Quat::from_rotation_z(f32::to_radians(-164.1))),
         ..default()
     };
 
+    let mut sprite2 = SpriteBundle {
+        transform: Transform::from_xyz(9., -7., -1.)
+            .with_scale(Vec3::new(1., 1., 1.))
+            .with_rotation(Quat::from_rotation_z(f32::to_radians(-15.8))),
+        sprite: Sprite {
+            color: Color::rgba(1., 1., 0., 1.),
+            ..sprite.sprite.clone()
+        },
+        ..sprite.clone()
+    };
+
+    let sprite3 = SpriteBundle {
+        transform: Transform::from_rotation(Quat::from_rotation_z(f32::to_radians(-30.))),
+        visibility: Visibility::Hidden,
+        ..sprite.clone()
+    };
     // let mut origin = sprite.clone();
     // let mut sprite2 = sprite.clone();
     // origin.transform.translation += Vec3::new(-300., 0., 0.);
     // sprite.transform.translation += Vec3::new(100., 100., 0.);
     // sprite2.transform.translation += Vec3::new(100., 0., 0.);
     // let origin = commands.spawn(origin).id();
-    let sprite = commands.spawn(sprite).id();
+    commands.spawn(sprite).with_children(|parent| {parent.spawn(sprite2).with_children(|parent| {parent.spawn(sprite3);});});
     // let sprite2 = commands.spawn(sprite2).id();
     // commands.insert_resource(Entities {
     //     parent: origin,

@@ -1,5 +1,11 @@
-[2m2023-03-30T07:38:48.675197Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Creating new window "Bevy App" (0v0)
-[2m2023-03-30T07:38:49.054680Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "Intel(R) HD Graphics Family", vendor: 32902, device: 2582, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Dx12 }
-[2m2023-03-30T07:38:51.488749Z[0m [32m INFO[0m [2mbevy_diagnostic::system_information_diagnostics_plugin::internal[0m[2m:[0m SystemInfo { os: "Windows 10 Pro", kernel: "19045", cpu: "Intel(R) Core(TM) i5-4300U CPU @ 1.90GHz", core_count: "2", memory: "3.9 GiB" }
-[2m2023-03-30T07:39:01.376631Z[0m [32m INFO[0m [2mbevy_window::system[0m[2m:[0m No windows are open, exiting
-[2m2023-03-30T07:39:01.377092Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Closing window 0v0
+commit 3ebbcad351befeb856a0ce6ef34fee62d8e15b21
+Author: Esu0 <jshintaro1018@gmail.com>
+Date:   Thu Mar 30 16:41:33 2023 +0900
+
+    animation1
+
+commit 46bd3903f53290d0f9261f5aeefe829441246923
+Author: Esu0 <jshintaro1018@gmail.com>
+Date:   Wed Mar 29 17:12:34 2023 +0900
+
+    first commit
