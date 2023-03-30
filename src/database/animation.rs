@@ -319,6 +319,10 @@ impl UnitImage {
     }
 }
 
+fn space_pressed(input: Res<Input<KeyCode>>) -> bool {
+    input.just_pressed(KeyCode::Space)
+}
+
 impl State {
     pub fn from_model(model: &Mamodel) -> Self {
         Self {
@@ -499,6 +503,7 @@ fn update_unit_sprite(
     ids: Res<UnitSpriteId>,
     mut color_materials: ResMut<Assets<ColorMaterial>>,
     mut glow_materials: ResMut<Assets<Glow1Material>>,
+    // input: Res<Input<KeyCode>>,
 ) {
     update_texture(
         &mut commands,
@@ -530,20 +535,20 @@ fn debug_system(
     mut commands: Commands,
 ) {
     if input.just_pressed(KeyCode::Space) {
-        let (t11, t62) = (
-            query.get(ids.parts[11].parent).unwrap(),
-            query.get(ids.parts[62].parent).unwrap(),
-        );
-        println!(
-            "11: {:?}, angle: {}",
-            t11,
-            t11.rotation.angle_between(Quat::default()).to_degrees()
-        );
-        println!(
-            "62: {:?}, angle: {}",
-            t62,
-            t62.rotation.angle_between(Quat::default()).to_degrees()
-        );
+        // let (t11, t62) = (
+        //     query.get(ids.parts[11].parent).unwrap(),
+        //     query.get(ids.parts[62].parent).unwrap(),
+        // );
+        // println!(
+        //     "11: {:?}, angle: {}",
+        //     t11,
+        //     t11.rotation.angle_between(Quat::default()).to_degrees()
+        // );
+        // println!(
+        //     "62: {:?}, angle: {}",
+        //     t62,
+        //     t62.rotation.angle_between(Quat::default()).to_degrees()
+        // );
     }
     // println!("test");
     // if input.just_pressed(KeyCode::Left) {
@@ -605,8 +610,9 @@ pub struct PluginTemp;
 
 impl Plugin for PluginTemp {
     fn build(&self, app: &mut App) {
+        let timer = on_timer(Duration::from_secs_f32(1. / 30.));
         app.add_startup_system(startup_sprite_images)
-            .add_system(update_unit_sprite.run_if(on_timer(Duration::from_secs_f32(1. / 30.))))
+            .add_system(update_unit_sprite.run_if(timer))
             .add_system(debug_system);
     }
 }
@@ -708,7 +714,7 @@ fn update_texture(
     for (state, id) in states.states.iter().zip(&ids.parts).skip(1) {
         commands.entity(id.parent).remove_parent();
     }
-    // println!("state72: {:?}", states.states[72]);
+    println!("state243: {:?}", states.states[243]);
     for (i, (state, id)) in states.states.iter().zip(&ids.parts).enumerate() {
         let opacity;
         let zorder;
@@ -810,7 +816,7 @@ fn update_texture(
         if state.vertical_flip {
             angle = -angle;
         }
-        let parent_transform = Transform::from_xyz(state.x as f32, -state.y as f32, zorder as f32)
+        let parent_transform = Transform::from_xyz(state.x as f32, -state.y as f32, zorder as f32 + i as f32 / states.states.len() as f32)
             .with_rotation(Quat::from_rotation_z(angle * angle_direction))
             .with_scale(Vec3::new(scalex, scaley, 1.));
 

@@ -331,7 +331,7 @@ impl StateDiffGenerator {
         let mut diff_set = Vec::new();
         for ((part, ind), queue) in maanim.parts.iter().zip(part_indice).zip(buf_queue) {
             if part.loops {
-                if *current_frame > part.frame_end {
+                if *current_frame >= part.frame_end {
                     continue;
                 }
             }
@@ -391,7 +391,7 @@ impl StateDiffGenerator {
                                 });
                             }
                         } else {
-                            for _ in 1..fd {
+                            for _ in 2..fd {
                                 queue.push_front(None);
                             }
                             queue
@@ -470,8 +470,8 @@ impl StateDiffGenerator {
                                 ));
                             }
                         }
-                        println!("(id: {}, frame: {current_frame}): {queue:?}", part.id);
-                        println!("func(): {}", func(1. / fd as f64));
+                        // println!("(id: {}, frame: {current_frame}): {queue:?}", part.id);
+                        // println!("func(): {}", func(1. / fd as f64));
                     }
                     Easing::Ease3 => {
                         let low = (*ind - 1) as usize;
