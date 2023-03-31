@@ -371,7 +371,7 @@ fn startup_sprite_images(
     mut glow_materials: ResMut<Assets<Glow1Material>>,
 ) {
     let unit_id = std::fs::read_to_string("num.txt").unwrap().parse().unwrap();
-    let selector = UnitSelector::Unit((unit_id, UnitForm::Form1));
+    let selector = UnitSelector::Unit((unit_id, UnitForm::Form2));
     // 画像関連のデータ
     let image_data = UnitImages::load(
         &[selector],
@@ -714,7 +714,7 @@ fn update_texture(
     for (state, id) in states.states.iter().zip(&ids.parts).skip(1) {
         commands.entity(id.parent).remove_parent();
     }
-    println!("state243: {:?}", states.states[243]);
+    // println!("state65: {:?}", states.states[6]);
     for (i, (state, id)) in states.states.iter().zip(&ids.parts).enumerate() {
         let opacity;
         let zorder;
@@ -724,7 +724,7 @@ fn update_texture(
         let scale_ratio = (image_data.mamodels.scale_ratio as f32).powi(3);
         let angle_ratio = image_data.mamodels.angle_ratio as f32;
         let mut angle_direction = 1.;
-        if state.parent >= 0 {
+        if i > 0 {
             commands
                 .entity(id.parent)
                 .set_parent(ids.parts[state.parent as usize].parent);

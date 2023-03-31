@@ -1,6 +1,6 @@
 #![allow(unused)]
 pub mod animation;
-
+pub mod spawn;
 use bevy::prelude::*;
 
 #[derive(Component)]
