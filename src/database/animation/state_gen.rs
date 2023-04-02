@@ -4,6 +4,7 @@ use crate::database::{
     consume_buf, get_next, get_next_line, get_string, Mamodel, Mamodels, ASSET_PATH,
 };
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use super::super::error::{Error, ErrorKind};
 use super::UnitState;
@@ -36,7 +37,7 @@ pub struct Ease {
     easing: Easing,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Modification {
     Parent,
     Id,
@@ -122,13 +123,13 @@ impl Sign {
 #[derive(Clone, Debug)]
 pub struct StateDiffs(pub Vec<StateDiff>);
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StateDiff {
     pub id: i32,
     pub diff: StateDiffVal,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum StateDiffVal {
     Parent(i32),
     Id(i32),
@@ -196,40 +197,9 @@ impl Maanim {
 
             let len = get_next_line(&mut lines)?;
 
-            let mut eases = Vec::with_capacity(len + 1usize);
-            if len > 0 {
-                let s = get_string(&mut lines)?;
-                let mut split = s.split(',');
-                let frame: i32 = get_next(&mut split)?;
-                let ease = Ease {
-                    frame,
-                    value: get_next(&mut split)?,
-                    easing: {
-                        match get_next::<i32>(&mut split)? {
-                            0 => Easing::Linear,
-                            1 => Easing::Nothing,
-                            2 => Easing::InOut(get_next(&mut split)?),
-                            3 => Easing::Ease3,
-                            4 => Easing::Sine(Sign::from_int(get_next(&mut split)?)),
-                            _ => {
-                                return Err(Error::new(
-                                    ErrorKind::InvalidNumber,
-                                    "無効なEasingタイプ",
-                                ));
-                            }
-                        }
-                    },
-                };
-                if frame > 0 {
-                    eases.push(Ease {
-                        frame: 0,
-                        easing: Easing::Nothing,
-                        value: ease.value,
-                    });
-                }
-                eases.push(ease);
-            }
-            for _ in 1..len {
+            let mut eases = Vec::with_capacity(len);
+
+            for _ in 0..len {
                 let s = get_string(&mut lines)?;
                 let mut split = s.split(',');
                 eases.push(Ease {
@@ -361,6 +331,233 @@ enum DiffOrNothing {
     Nothing(u16),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiffData {
+    id: u16,
+    border: u32,
+    /// border以降の要素のみをループさせる
+    partial_loop: bool,
+    modification: Modification,
+    data: Box<[i32]>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StateDiffData(Box<[DiffData]>);
+
+impl StateDiffData {
+    // pub fn from_generator(mut generator: StateDiffGenerator, model: &Mamodels) -> Self {
+    //     let period = generator.maanim.period;
+    //     let mut data = Vec::new();
+    //     let mut split: Vec<u8> = Vec::new();
+    //     for _ in 0..period {
+    //         let diff = generator.next_state_diff().0;
+    //         let mut itr = diff.iter();
+    //         let mut l = 0;
+    //         let mut current = itr.next();
+    //         for i in 0..model.models.len() as i32 {
+    //             while current.map(|d| d.id <= i).unwrap_or(false) {
+    //                 current = itr.next();
+    //                 l += 1;
+    //             }
+    //             split.push(l);
+    //         }
+    //         data.extend(diff.iter().map(|d| d.diff));
+    //     }
+    //     Self {
+    //         data,
+    //         split,
+    //     }
+    // }
+
+    pub fn from_anim(maanim: Maanim, models: &Mamodels) -> Self {
+        Self(maanim.parts.into_iter().filter_map(|part| {
+            match part.eases.len() {
+                0 => None,
+                1 => Some(DiffData {
+                    id: part.id,
+                    border: u32::MAX,
+                    partial_loop: true,
+                    modification: part.modification,
+                    data: Box::new([part.eases[0].value]),
+                }),
+                len => {
+                    let mut v;
+                    let frame = part.eases[0].frame;
+                    let mut partial_loop;
+                    let mut border;
+                    let mut ind = 0;
+                    if frame > 0 {
+                        border = frame as u32;
+                        v = Vec::with_capacity(part.frame_end as usize);
+                        v.resize(frame as usize, part.eases[0].value);
+                        partial_loop = true;
+                    } else {
+                        v = Vec::with_capacity((part.frame_end - part.frame_start) as usize);
+                        partial_loop = false;
+                        border = (-frame) as u32;
+                    }
+                    if part.loops {
+                        partial_loop = true;
+                        border = u32::MAX;
+                    }
+                    let eases = &part.eases;
+                    while ind < eases.len() - 1 {
+                        match eases[ind].easing {
+                            Easing::Linear => {
+                                let ease1 = &eases[ind];
+                                ind += 1;
+                                let ease2 = &eases[ind];
+                                let fd = ease2.frame - ease1.frame;
+                                let vd = ease2.value - ease1.value;
+                                v.extend((0..fd).map(|i| ease1.value + (i as f64 / fd as f64 * vd as f64) as i32));
+                            },
+                            Easing::Nothing => {
+                                let ease1 = &eases[ind];
+                                ind += 1;
+                                let ease2 = &eases[ind];
+                                let fd = ease2.frame - ease1.frame;
+                                v.extend((0..fd).map(|i| ease1.value));
+                            },
+                            Easing::InOut(p) => {
+                                fn neg(x: f64, param: i32) -> f64 {
+                                    (1. - (1. - x).powi(-param)).sqrt()
+                                }
+                                fn pos(x: f64, param: i32) -> f64 {
+                                    1. - (1. - x.powi(param)).sqrt()
+                                }
+                                let func = if p >= 0 { pos } else { neg };
+                                let ease1 = &eases[ind];
+                                ind += 1;
+                                let ease2 = &eases[ind];
+                                let fd = ease2.frame - ease1.frame;
+                                let vd = ease2.value - ease1.value;
+                                v.extend((0..fd).map(|i| ease1.value + (vd as f64 * func(i as f64 / fd as f64, p)) as i32));
+                            },
+                            Easing::Sine(sig) => {
+                                fn sine_p(x: f64) -> f64 {
+                                    1. - (x * std::f64::consts::FRAC_PI_2).cos()
+                                }
+                                fn sine_n(x: f64) -> f64 {
+                                    (x * std::f64::consts::FRAC_PI_2).sin()
+                                }
+                                fn sine_z(x: f64) -> f64 {
+                                    (1. - (x * std::f64::consts::PI).cos()) / 2.
+                                }
+                                let func = match sig {
+                                    Sign::Positive => sine_p,
+                                    Sign::Negative => sine_n,
+                                    Sign::Zero => sine_z,
+                                };
+                                let ease1 = &eases[ind];
+                                ind += 1;
+                                let ease2 = &eases[ind];
+                                let fd = ease2.frame - ease1.frame;
+                                let vd = ease2.value - ease1.value;
+                                v.extend((0..fd).map(|i| ease1.value + (vd as f64 * func(i as f64 / fd as f64)) as i32));
+                            },
+                            Easing::Ease3 => {
+                                let low = ind;
+                                ind += 1;
+                                while ind < eases.len() - 1 {
+                                    if eases[ind].easing != Easing::Ease3 {
+                                        break;
+                                    }
+                                    ind += 1;
+                                }
+                                let high = ind;
+                                v.extend(calculate_ease3(&eases[low..high]));
+                            }
+                        }
+                    }
+                    v.push(eases.last().unwrap().value);
+                    Some(DiffData {
+                        id: part.id,
+                        border,
+                        partial_loop,
+                        modification: part.modification,
+                        data: v.into_boxed_slice(),
+                    })
+                }
+            }
+        }).collect())
+    }
+
+    pub fn apply_state(&self, states: &mut UnitState, frame: u32) {
+        for data in self.0.as_ref() {
+            let border = data.border as usize;
+            let len = data.data.len() - 1;
+            let ind;
+            if data.partial_loop {
+                ind = if frame < data.border {
+                    frame as usize
+                } else {
+                    (frame as usize - border).checked_rem(len - border).unwrap_or(0) + border
+                    // (frame as usize - border) % (data.data.len() - border) + border
+                };
+            } else {
+                ind = (frame as usize + border) % len;
+            }
+            if let Some(val) = data.data.get(ind).copied() {
+                states.states[data.id as usize].load_diff(StateDiffVal::new(data.modification, val));
+            }
+        }
+    }
+}
+
+
+pub mod from_data {
+    use bevy::prelude::Resource;
+
+    use crate::database::{animation::UnitState, Mamodels};
+    use super::{StateDiffData, Maanim};
+
+    #[derive(Resource, Clone, Debug)]
+    pub struct StateGenerator {
+        data: StateDiffData,
+        current_frame: u32,
+        current_state: UnitState,
+    }
+
+    impl StateGenerator {
+        pub fn from_anim(maanim: Maanim, models: &Mamodels) -> Self {
+            Self {
+                data: StateDiffData::from_anim(maanim, models),
+                current_frame: 0,
+                current_state: UnitState::from_model(models),
+            }
+        }
+        pub fn next_state(&mut self) -> UnitState {
+            let Self { data, current_frame, current_state } = self;
+            data.apply_state(current_state, *current_frame);
+            *current_frame += 1;
+            current_state.clone()
+        }
+
+        pub fn empty(models: &Mamodels) -> Self {
+            Self {
+                data: StateDiffData::default(),
+                current_frame: 0,
+                current_state: UnitState::from_model(models),
+            }
+        }
+    }
+}
+fn calculate_ease3(eases: &[Ease]) -> impl Iterator<Item = i32> + '_ {
+    let low = eases.first().unwrap().frame;
+    let high = eases.last().unwrap().frame;
+    (low..high).map(|f| {
+        (eases.iter().enumerate().map(|(i, ease)| {
+            let mut val = 4096. * ease.value as f64;
+            eases.get(..i).into_iter().for_each(|eases| eases.iter().for_each(|ease2| {
+                val *= (f - ease2.frame) as f64 / (ease.frame - ease2.frame) as f64;
+            }));
+            eases.get((i + 1)..).into_iter().for_each(|eases| eases.iter().for_each(|ease2| {
+                val *= (f - ease2.frame) as f64 / (ease.frame - ease2.frame) as f64;
+            }));
+            val
+        }).sum::<f64>() / 4096.) as i32
+    })
+}
 impl StateDiffGenerator {
     fn next_state_diff(&mut self) -> StateDiffs {
         let Self {
@@ -374,6 +571,19 @@ impl StateDiffGenerator {
         // println!("next_state_diff");
         // println!("{}, {}, {}", maanim.parts.len(), part_indice.len(), buf_queue.len());
         for ((part, ind), queue) in maanim.parts.iter().zip(part_indice).zip(buf_queue) {
+            match part.eases.len() {
+                0 => {
+                    continue;
+                }
+                1 => {
+                    diff_set.push(StateDiff {
+                        id: part.id as _,
+                        diff: StateDiffVal::new(part.modification, part.eases[0].value),
+                    });
+                    continue;
+                }
+                _ => {}
+            }
             let period = if part.loops {
                 maanim.period as i32
             } else {
@@ -382,7 +592,7 @@ impl StateDiffGenerator {
             // println!("{}", part.loops);
             let part_frame =
                 (*current_frame - part.frame_start).rem_euclid(period) + part.frame_start;
-            
+
             // if part.id == 5 && part.modification == Modification::Opacity {
             //     println!("part_frame:{part_frame}, ind:{ind}, queue:{queue:?}");
             // }
@@ -400,20 +610,6 @@ impl StateDiffGenerator {
                     }
                 }
             } else {
-                
-                match part.eases.len() {
-                    0 => {
-                        continue;
-                    }
-                    1 => {
-                        diff_set.push(StateDiff {
-                            id: part.id as _,
-                            diff: StateDiffVal::new(part.modification, part.eases[0].value),
-                        });
-                        continue;
-                    }
-                    _ => {}
-                }
                 match part_frame.cmp(&part.frame_end) {
                     Ordering::Greater => {
                         // println!("greater");
@@ -431,7 +627,7 @@ impl StateDiffGenerator {
                     }
                     _ => {}
                 }
-                
+
                 let mut ease1 = &part.eases[*ind as usize];
                 *ind += 1;
                 let fd;
@@ -619,6 +815,11 @@ impl StateDiffGenerator {
 }
 #[cfg(test)]
 mod test {
+    use crate::database::{
+        animation::{AnimSelector, UnitForm, UnitSelector},
+        BC_ASSET_PATH,
+    };
+
     use super::*;
 
     #[test]
@@ -631,25 +832,29 @@ mod test {
 
     #[test]
     fn load_all_unit() {
-        let unit_path = Path::new("assets/org/unit");
+        let unit_path = Path::new("org/unit");
+        let mut max = 0;
         // unit読み込み
         for i in 0..=697 {
             for c in ['f', 's', 'c'] {
                 for j in 0..4 {
                     let path =
                         unit_path.join(format!("{0:>03}/{c}/{0:>03}_{c}{1:>02}.maanim", i, j));
+                    // println!("{}", path.is_file());
                     if let Ok(anim) = Maanim::load(path) {
-                        if let Some(part) = anim
+                        let sum = anim
                             .parts
-                            .iter()
-                            .find(|elem| elem.modification == Modification::Id)
-                        {
-                            println!("({i}, {c}, {j}): {:#?}", part);
+                            .into_iter()
+                            .map(|part| part.frame_end - part.frame_start)
+                            .sum();
+                        if max < sum {
+                            max = sum;
                         }
                     }
                 }
             }
         }
+        println!("{max}");
     }
 
     #[test]
@@ -681,5 +886,48 @@ mod test {
                 }
             }
         }
+    }
+
+    use std::io::BufWriter;
+    #[test]
+    fn generate_diff() {
+        // for i in 693..=697 {
+        //     for j in [UnitForm::Form1, UnitForm::Form2, UnitForm::Form3] {
+        //         let selector = UnitSelector::Unit((i, j));
+        //         let model = match selector.load_mamodel() {
+        //             Ok(model) => model,
+        //             Err(e) => {
+        //                 println!("{e:?}");
+        //                 continue;
+        //             }
+        //         };
+        //         let mut v = Vec::with_capacity(7);
+        //         for anim_selector in [
+        //             AnimSelector::Walk,
+        //             AnimSelector::Idle,
+        //             AnimSelector::Attack,
+        //             AnimSelector::HitBack,
+        //             AnimSelector::BurrowDown,
+        //             AnimSelector::BurrowMove,
+        //             AnimSelector::BurrowUp,
+        //         ] {
+        //             let anim = selector.load_maanim(anim_selector).ok();
+        //             let generator = anim
+        //                 .map(|anim| {
+        //                     StateDiffData::from_generator(
+        //                         anim.into_state_generator(&model).diff_generator,
+        //                         &model,
+        //                     )
+        //                 })
+        //                 .unwrap_or_default();
+        //             v.push(generator);
+        //         }
+        //         let path = Path::new(ASSET_PATH)
+        //             .join(BC_ASSET_PATH)
+        //             .join(selector.filename() + ".animdiff");
+        //         let writer = BufWriter::new(File::create(path).unwrap());
+        //         serde_json::to_writer(writer, &v).unwrap();
+        //     }
+        // }
     }
 }

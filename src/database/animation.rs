@@ -1,9 +1,9 @@
 pub mod state_gen;
 use crate::material::Glow1Material;
 
-use self::state_gen::{Maanim, StateDiff, StateDiffVal, StateDiffs, StateGenerator};
+use self::state_gen::{Maanim, StateDiff, StateDiffVal, StateDiffs, from_data::StateGenerator};
 
-use super::*;
+use super::{*, error::Error};
 use bevy::{
     prelude::*,
     sprite::{Anchor, MaterialMesh2dBundle, Mesh2dHandle},
@@ -217,6 +217,18 @@ impl UnitSelector {
                 AnimSelector::BurrowUp => "_zombie02.maanim",
             }
     }
+
+    pub fn load_imgcut(&self) -> Result<Vec<Imgcut>, Error> {
+        Imgcut::load(Path::new(BC_ASSET_PATH).join(self.imgcuts())).map(|(_, v)| v)
+    }
+
+    pub fn load_mamodel(&self) -> Result<Mamodels, Error> {
+        Mamodels::load(Path::new(BC_ASSET_PATH).join(self.mamodels()))
+    }
+
+    pub fn load_maanim(&self, selector: AnimSelector) -> Result<Maanim, Error> {
+        Maanim::load(Path::new(BC_ASSET_PATH).join(self.maanim(selector)))
+    }
 }
 
 use super::{ASSET_PATH, BC_ASSET_PATH};
@@ -371,7 +383,7 @@ fn startup_sprite_images(
     mut glow_materials: ResMut<Assets<Glow1Material>>,
 ) {
     let unit_id = std::fs::read_to_string("num.txt").unwrap().parse().unwrap();
-    let selector = UnitSelector::Unit((unit_id, UnitForm::Form2));
+    let selector = UnitSelector::Unit((unit_id, UnitForm::Form1));
     // 画像関連のデータ
     let image_data = UnitImages::load(
         &[selector],
@@ -400,7 +412,7 @@ fn startup_sprite_images(
     // アニメーション定義
     commands.insert_resource(
         maanim
-            .map(|anim| anim.into_state_generator(&mamodels))
+            .map(|anim| StateGenerator::from_anim(anim ,&mamodels))
             .unwrap_or_else(|| StateGenerator::empty(&mamodels)),
     );
 
@@ -714,7 +726,7 @@ fn update_texture(
     for (state, id) in states.states.iter().zip(&ids.parts).skip(1) {
         commands.entity(id.parent).remove_parent();
     }
-    // println!("state65: {:?}", states.states[6]);
+    println!("state39: {:?}", states.states[39]);
     for (i, (state, id)) in states.states.iter().zip(&ids.parts).enumerate() {
         let opacity;
         let zorder;
