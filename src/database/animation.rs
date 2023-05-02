@@ -20,8 +20,11 @@ pub struct BcuAnim;
 /// 使用中の全ユニットの画像とimagecutのデータ
 #[derive(Resource)]
 pub struct UnitImages {
-    images: Vec<Option<UnitImage>>,
+    pub images: Vec<Option<UnitImage>>,
 }
+
+#[derive(Clone, Resource)]
+pub struct UnitSpriteIds(Vec<UnitSpriteId>);
 
 /// 1ユニットの各パーツのスプライトのID
 #[derive(Clone, Resource)]
@@ -61,12 +64,12 @@ impl From<Imgcut> for Size2d {
 /// 1キャラの画像データ
 #[derive(Clone)]
 pub struct UnitImage {
-    materials: Vec<PartMaterialHandle>,
+    pub materials: Vec<PartMaterialHandle>,
     // glow1_image: HashMap<i32, Handle<Image>>,
     // imgcuts: Vec<Imgcut>,
-    size: Vec<Size2d>,
-    meshes: Vec<Mesh2dHandle>,
-    mamodels: Mamodels,
+    pub size: Vec<Size2d>,
+    pub meshes: Vec<Mesh2dHandle>,
+    pub mamodels: Mamodels,
 }
 
 // pub struct AnimDBElem {
@@ -245,7 +248,7 @@ impl UnitImages {
                 .iter()
                 .map(|id| {
                     match UnitImage::load(
-                        id.clone(),
+                        *id,
                         asset_server,
                         meshes,
                         color_materials,
@@ -383,7 +386,7 @@ fn startup_sprite_images(
     mut glow_materials: ResMut<Assets<Glow1Material>>,
 ) {
     let unit_id = std::fs::read_to_string("num.txt").unwrap().parse().unwrap();
-    let selector = UnitSelector::Unit((unit_id, UnitForm::Form1));
+    let selector = UnitSelector::Unit((unit_id, UnitForm::Form2));
     // 画像関連のデータ
     let image_data = UnitImages::load(
         &[selector],
@@ -412,8 +415,8 @@ fn startup_sprite_images(
     // アニメーション定義
     commands.insert_resource(
         maanim
-            .map(|anim| StateGenerator::from_anim(anim ,&mamodels))
-            .unwrap_or_else(|| StateGenerator::empty(&mamodels)),
+            .map(|anim| StateGenerator::from_anim(anim ,mamodels))
+            .unwrap_or_else(|| StateGenerator::empty(mamodels)),
     );
 
     // commands.insert_resource(StateGenerator::with_raw_model(&mamodels));
@@ -726,7 +729,7 @@ fn update_texture(
     for (state, id) in states.states.iter().zip(&ids.parts).skip(1) {
         commands.entity(id.parent).remove_parent();
     }
-    println!("state39: {:?}", states.states[39]);
+    // println!("state6: {:?}", states.states[6]);
     for (i, (state, id)) in states.states.iter().zip(&ids.parts).enumerate() {
         let opacity;
         let zorder;
@@ -772,7 +775,7 @@ fn update_texture(
         } else {
             let mut parent_ind = state.parent as usize;
             let mut indice = vec![i];
-            while let None = opacities[parent_ind] {
+            while opacities[parent_ind].is_none() {
                 indice.push(parent_ind);
                 parent_ind = states.states[parent_ind].parent as usize;
             }

@@ -1,12 +1,9 @@
 #![allow(unused)]
 pub mod animation;
 pub mod spawn;
+pub mod image_handle;
 use bevy::prelude::*;
 
-#[derive(Component)]
-pub struct Unit {
-    id: i32,
-}
 
 pub struct BattleCatsDB {}
 

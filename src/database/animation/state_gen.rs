@@ -465,7 +465,7 @@ impl StateDiffData {
                                     ind += 1;
                                 }
                                 let high = ind;
-                                v.extend(calculate_ease3(&eases[low..high]));
+                                v.extend(calculate_ease3(&eases[low..=high]));
                             }
                         }
                     }
@@ -486,17 +486,16 @@ impl StateDiffData {
         for data in self.0.as_ref() {
             let border = data.border as usize;
             let len = data.data.len() - 1;
-            let ind;
-            if data.partial_loop {
-                ind = if frame < data.border {
+            let ind = if data.partial_loop {
+                if frame < data.border {
                     frame as usize
                 } else {
                     (frame as usize - border).checked_rem(len - border).unwrap_or(0) + border
                     // (frame as usize - border) % (data.data.len() - border) + border
-                };
+                }
             } else {
-                ind = (frame as usize + border) % len;
-            }
+                (frame as usize + border) % len
+            };
             if let Some(val) = data.data.get(ind).copied() {
                 states.states[data.id as usize].load_diff(StateDiffVal::new(data.modification, val));
             }
